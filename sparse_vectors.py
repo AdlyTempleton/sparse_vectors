@@ -164,12 +164,18 @@ def fit_and_report(vectors, target_word, basis_size, alpha, extra_exclude=set())
                                                                                 approximation_error_cos))
 
 
-def fit_ith_sparse_vector_excluding_self(vectors_matrix, basis_vectors, alpha, i):
-    target_vector = vectors_matrix[i]
-    if i < basis_vectors.shape[0]:
-        basis_vectors = np.copy(basis_vectors)
-        basis_vectors[i, :] = 0
-    return fit_sparse_vector(target_vector, basis_vectors, alpha=alpha)
+def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
+    target_vector = vectors.syn0[i]
+    target_word = vectors.index2word[i]
+
+    basis_matrix = basis.get_matrix()
+
+    if target_word in basis.get_words_inverse_map():
+        # We need the index in the basis set
+        basis_index = basis.get_words_inverse_map()[target_word]
+        basis_matrix = np.copy(basis_matrix)
+        basis_matrix[basis_index, :] = 0
+    return fit_sparse_vector(target_vector, basis_matrix, alpha=alpha)
 
 
 def fit_all_vectors_pytorch(vectors, basis, alpha, reconstructed=False):
@@ -185,7 +191,7 @@ def fit_all_vectors_pytorch(vectors, basis, alpha, reconstructed=False):
     if sum(chunk_sizes) != n_vectors:
         chunk_sizes.append(n_vectors - sum(chunk_sizes))
 
-    # Now iterate through all these chunks
+    # Now irterate through all these chunks
     i = 0
     r = []
     for chunk in chunk_sizes:
@@ -227,11 +233,11 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     # .syn0 is a matrix, and we want to process each row seperatley
     # Hackiness because multiprocessing cant pickle lambda functions
     # So we use functools.partial to store the local context
-    # mapped_function = functools.partial(fit_ith_sparse_vector_excluding_self, vectors.syn0, basis_vectors, alpha)
-    mapped_function = functools.partial(fit_sparse_vector, basis_vectors=basis.get_matrix(), alpha=alpha)
+    mapped_function = functools.partial(fit_ith_sparse_vector_excluding_self, vectors, basis, alpha)
+    # mapped_function = functools.partial(fit_sparse_vector, basis_vectors=basis.get_matrix(), alpha=alpha)
     print("Starting multiprocessing map")
     sparse_vectors_list = list(
-        tqdm.tqdm(pool.imap(mapped_function, (vectors.syn0[i] for i in range(num_vectors)), chunksize=10),
+        tqdm.tqdm(pool.imap(mapped_function, (i for i in range(num_vectors)), chunksize=10),
                   total=num_vectors))
 
     if reconstructed:

@@ -11,7 +11,7 @@ from gensim.models import KeyedVectors
 
 def run_sparse_vectors(basis_size, alpha, reconstructed):
     basis = get_top_n_vectors(vectors, basis_size, exclude={})
-    return basis, fit_all_vectors_pytorch(vectors, basis, alpha=alpha, reconstructed=reconstructed)
+    return basis, fit_all_vectors(vectors, basis, alpha=alpha, reconstructed=reconstructed)
 
 
 if __name__ == "__main__":
