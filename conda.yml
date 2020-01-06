@@ -282,3 +282,4 @@ dependencies:
       - ptyprocess==0.6.0
       - smmap2==2.0.5
 prefix: C:\Users\Adly\Anaconda3\envs\py35
+
