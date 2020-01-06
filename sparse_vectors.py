@@ -198,7 +198,7 @@ def get_chunks(n, m):
     chunk_boundaries = []
     for x in chunk_sizes:
         cum_sum += x
-        chunk_boundaries.append(x)
+        chunk_boundaries.append(cum_sum)
 
     # Now we stagger these boundaries and zip them together
     # Note that zip cuts off the dangling half-chunk starting at n
@@ -240,8 +240,6 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     sparse_vectors.syn0norm = sparse_vectors.syn0
     # Recreate metadata
     sparse_vectors.vector_size = sparse_vectors.syn0.shape[1]
-    print(sparse_vectors.syn0.shape[1])
-    print(sparse_vectors)
     return sparse_vectors
 
 # vectors = KeyedVectors.load_word2vec_format('wiki-news-300d-1M.vec',limit=100000)
