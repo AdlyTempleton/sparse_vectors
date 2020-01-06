@@ -195,7 +195,7 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     # So we use functools.partial to store the local context
     mapped_function = functools.partial(fit_ith_sparse_vector_excluding_self, vectors, basis, alpha)
     # mapped_function = functools.partial(fit_sparse_vector, basis_vectors=basis.get_matrix(), alpha=alpha)
-    print("Starting multiprocessing map")
+    print("Starting multiprocessing map with {} CPUs".format(cpus))
     sparse_vectors_list = list(
         tqdm.tqdm(pool.imap(mapped_function, (i for i in range(num_vectors)), chunksize=10),
                   total=num_vectors))
