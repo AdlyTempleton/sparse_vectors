@@ -7,6 +7,7 @@ import multiprocessing
 import sklearn
 import functools
 import lightning
+import sys
 from lightning.regression import FistaRegressor
 import spacy
 from sklearn.preprocessing import normalize
@@ -176,6 +177,34 @@ def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
     return fit_sparse_vector(target_vector, basis_matrix, alpha=alpha)
 
 
+def fit_chunk_of_vectors(vectors, basis, alpha, chunk):
+    """Calls fit_ith_vector_excluding_self for each i in the range(chunk), and returns the output as a list
+    Used to prevent expensive serialization for every call when multiprocessing"""
+    start, end = chunk
+    r = (fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i) for i in range(start, end))
+    # If start == 0 then dispaly a progress bar
+    return list(r) if start != 0 else list(tqdm.tqdm(r, total=end))
+
+
+def get_chunks(n, m):
+    """Returns chunk boundary tuples to divide a list of size n into m almost equal sized ranges"""
+    # First, we calculate the sizes
+    chunk_sizes = [n // m] * m
+    remainder = n - sum(chunk_sizes)
+    chunk_sizes = [x + (1 if i < remainder else 0) for i, x in enumerate(chunk_sizes)]
+
+    # Now we take partial sums to get chunk boundaries
+    cum_sum = 0
+    chunk_boundaries = []
+    for x in chunk_sizes:
+        cum_sum += x
+        chunk_boundaries.append(x)
+
+    # Now we stagger these boundaries and zip them together
+    # Note that zip cuts off the dangling half-chunk starting at n
+    return zip([0] + chunk_boundaries, chunk_boundaries)
+
+
 def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     # We want to create a new gensim.models.KeyedVectors
     # The actual vectors stored in .syn0 (and .syn0norm has the normalized version, identical here)
@@ -193,20 +222,19 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     # .syn0 is a matrix, and we want to process each row seperatley
     # Hackiness because multiprocessing cant pickle lambda functions
     # So we use functools.partial to store the local context
-    mapped_function = functools.partial(fit_ith_sparse_vector_excluding_self, vectors, basis, alpha)
-    # mapped_function = functools.partial(fit_sparse_vector, basis_vectors=basis.get_matrix(), alpha=alpha)
+    mapped_function = functools.partial(fit_chunk_of_vectors, vectors, basis, alpha)
     print("Starting multiprocessing map with {} CPUs".format(cpus))
-    sparse_vectors_list = list(
-        tqdm.tqdm(pool.imap(mapped_function, (i for i in range(num_vectors)), chunksize=1),
-                  total=num_vectors))
+    sparse_vectors_list = pool.imap(mapped_function, get_chunks(num_vectors, cpus), chunksize=1)
 
-    if reconstructed:
-        # Multiply by basis vectors
-        mapped_function = functools.partial(np.matmul, b=basis.get_matrix())
-        sparse_vectors_list = list(tqdm.tqdm(pool.imap(mapped_function, sparse_vectors_list)))
+    # Flatten the list-of-lists
+    sparse_vectors_list = sum(sparse_vectors_list, [])
 
     # Reform into a matrix
     sparse_vectors.syn0 = np.stack(sparse_vectors_list)
+
+    if reconstructed:
+        print("Reconstructing")
+        sparse_vectors.syn0 = np.matmul(sparse_vectors.syn0, basis.get_matrix())
 
     # All vectors are already normalized
     sparse_vectors.syn0norm = sparse_vectors.syn0
