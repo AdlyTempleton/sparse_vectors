@@ -5,6 +5,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - python=3.5.5
   - tqdm=4.40.2
   - numpy=1.12.1
   - gensim=3.5.0
