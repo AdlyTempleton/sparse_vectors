@@ -1,4 +1,3 @@
-
 import gensim
 import numpy as np
 import gc
@@ -14,7 +13,6 @@ from sklearn.preprocessing import normalize
 import math
 import scipy
 import tqdm
-from pytorch_sparse_regressor import PytorchSparseRegressor
 
 # Load pretrained fastText vectors
 
