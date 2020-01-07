@@ -47,7 +47,42 @@ class Basis:
     def get_vector(self, word):
         return self.matrix[self.words_inv[word]]
 
+    def merge(self, other):
+        return Basis(matrix=np.concatenate((self.matrix, other.matrix)),
+                     words_list=self.get_words_list() + other.get_words_list())
 
+
+def get_syntactic_basis(vectors, filename='syntactic.txt'):
+    # Files are formatted with headers, starting with <, and then a list of pairs of words (command-seperated)
+    with open(filename, 'r') as file:
+        # Keep track of the previous sections that we have parsed
+        basis_words_list = []
+        basis_vectors = []
+        # name of current section we are parsing
+        name = None
+        # Vectors in current section we are parsing
+        vector_diffs = []
+
+        def finish_section():
+            basis_words_list.append(name)
+            basis_vectors.append(np.mean(np.stack(vector_diffs), axis=0))
+
+        for line in file:
+            if line[0] == '<':
+                # If this is not the first section
+                if name is not None:
+                    finish_section()
+                name = line
+            else:
+                try:
+                    a, b = line.strip().split(',')
+                    vec_a, vec_b = vectors.get_vector(a), vectors.get_vector(b)
+                    vector_diffs.append(vec_a - vec_b)
+                except KeyError as e:
+                    print(e)
+                    print("Skipping pair {},{}".format(a, b))
+    finish_section()
+    return Basis(np.stack(basis_vectors, axis=0), words_list=basis_words_list)
 def filter_by_lemma(vocab_dict, exclude=set()):
     """Filters a gensim vocabulary dict to contain only one word for each lemma
     Keeps the most frequent word
@@ -232,14 +267,17 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     # Reform into a matrix
     sparse_vectors.syn0 = np.stack(sparse_vectors_list)
 
-    if reconstructed:
-        print("Reconstructing")
-        sparse_vectors.syn0 = np.matmul(sparse_vectors.syn0, basis.get_matrix())
-
     # All vectors are already normalized
     sparse_vectors.syn0norm = sparse_vectors.syn0
     # Recreate metadata
     sparse_vectors.vector_size = sparse_vectors.syn0.shape[1]
-    return sparse_vectors
+
+    # Reconstruct the approximation to the original dense vectors represented by the sparse vectors
+    print("Reconstructing")
+    reconstructed = copy(sparse_vectors)
+    reconstructed.syn0 = np.matmul(sparse_vectors.syn0, basis.get_matrix())
+    reconstructed.syn0_norm = reconstructed.syn0
+    reconstructed.vector_size = reconstructed.syn0.shape[1]
+    return sparse_vectors, reconstructed
 
 # vectors = KeyedVectors.load_word2vec_format('wiki-news-300d-1M.vec',limit=100000)
