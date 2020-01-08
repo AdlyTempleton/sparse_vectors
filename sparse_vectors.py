@@ -133,7 +133,7 @@ def get_top_n_vectors(vectors, n, exclude, do_filter_by_lemma=True, do_normalize
 
 
 # Helper functions for working with model output
-def small_to_zero(x, threshold=1e-5):
+def small_to_zero(x, threshold=1e-3):
     """
     Sets very small values in a numpy matrix to 0
     May modify original array
@@ -190,6 +190,7 @@ def fit_and_report(vectors, target_word, basis_size, alpha, extra_exclude=set())
     print(word_equation(sparse_embedding, basis, target_word=target_word))
 
     # Calculate representation errors
+
     approximation_error = np.linalg.norm(reconstructed_embedding - original_embedding, 1)
     approximation_error_L2 = np.linalg.norm(reconstructed_embedding - original_embedding, 2)
     approximation_error_cos = scipy.spatial.distance.cosine(reconstructed_embedding, original_embedding)
