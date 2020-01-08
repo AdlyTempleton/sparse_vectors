@@ -209,8 +209,13 @@ def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
         # We need the index in the basis set
         basis_index = basis.get_words_inverse_map()[target_word]
         basis_matrix = np.copy(basis_matrix)
+        # We zero out the row and restore it later
+        saved_vector = basis_matrix[basis_index, :]
         basis_matrix[basis_index, :] = 0
-    return fit_sparse_vector(target_vector, basis_matrix, alpha=alpha)
+    r = fit_sparse_vector(target_vector, basis_matrix, alpha=alpha)
+    if target_word in basis.get_words_inverse_map():
+        basis_matrix[basis_index, :] = saved_vector
+    return r
 
 
 def fit_chunk_of_vectors(vectors, basis, alpha, chunk):
