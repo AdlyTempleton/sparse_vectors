@@ -249,7 +249,7 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     num_vectors = sparse_vectors.syn0.shape[0]
 
     try:
-        cpus = multiprocessing.cpu_count() - 2
+        cpus = max(30, multiprocessing.cpu_count() - 2)
     except NotImplementedError:
         cpus = 2  # arbitrary default
     pool = multiprocessing.Pool(processes=cpus)
