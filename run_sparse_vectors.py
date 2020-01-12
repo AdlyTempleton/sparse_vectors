@@ -12,7 +12,8 @@ from gensim.models import KeyedVectors
 def run_sparse_vectors(vectors, args):
     basis = get_top_n_vectors(vectors, args.basis, exclude={})
     if args.syntactic is not None:
-        basis = basis.merge(get_syntactic_basis(vectors, args.syntactic))
+        basis = basis.subtract_projection_and_merge(
+            get_pos_basis(vectors).merge(get_syntactic_basis(vectors, args.syntactic).orthogonalize()))
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 

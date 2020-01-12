@@ -11,7 +11,7 @@ def small_to_zero_pytorch(X, threshold=1e-3):
     return X
 
 
-class PytorchSparseRegressor():
+class PyruSparseRegressor():
     def __init__(self, alpha, n_basis, n_target):
         self.alpha = alpha
         self.n_target = n_target
