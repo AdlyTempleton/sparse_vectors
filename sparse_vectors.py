@@ -4,6 +4,7 @@ import gc
 from gensim.models import KeyedVectors
 from copy import copy
 import multiprocessing
+from collections import OrderedDict
 from sklearn.linear_model import LinearRegression
 import sklearn
 import functools
@@ -83,7 +84,7 @@ class Basis:
         excluded_indices = [i for i, x in enumerate(self.get_words_list()) if x in excluded]
         new_matrix = np.delete(self.matrix, excluded_indices, axis=0)
         new_words_list = [x for x in self.words_list if x not in excluded]
-        return Basis(matrix=new_matrix, words_list=new_words_list)
+        return Basis(matrix=new_matrix, words_list=new_words_list, n_syntactic=self.n_syntactic)
 
     def slice(self, start, end):
         return Basis(matrix=self.matrix[start:end], words_list=self.words_list[start:end],
@@ -141,11 +142,18 @@ def get_syntactic_basis(vectors, filename='syntactic.txt'):
                  n_syntactic=len(basis_vectors)).orthogonalize()
 
 
+def center_normalize_vectors(vectors):
+    vectors.vectors = np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True))
+    vectors.vectors_norm = vectors.vectors
+    return vectors
+
 def get_pos_basis(vectors):
     pos = list(map(lambda word: spacy_nlp(word)[0].pos_, vectors.index2word))
-    excluded_pos = {'PUNCT', 'DET', 'ADP', 'PROPN', 'CCONJ', 'X', 'PRON', 'PART'}
     # Get unique parts of speech and create an inverse index
-    pos_groups = {x: [] for x in set(pos) if x not in excluded_pos}
+    # Order matters herer because it becomes the order of orthogonalization
+    pos_groups = OrderedDict()
+    for p in ['NOUN', 'VERB', 'ADJ', 'ADV', 'NUM']:
+        pos_groups[p] = []
     for i, x in enumerate(pos):
         if x in pos_groups:
             pos_groups[x].append(i)
@@ -163,7 +171,6 @@ def get_pca_basis(vectors):
     return Basis(
         matrix=normalize(pca.components_),
         words_list=['<<<C0>>>'], n_syntactic=1)
-
 
 def get_combined_syntactic_basis(vectors, syntactic_filename='syntactic.txt'):
     return get_pca_basis(vectors).merge(get_pos_basis(vectors)).merge(
@@ -220,7 +227,7 @@ def get_top_n_vectors(vectors, n, exclude, do_filter_by_lemma=True, do_normalize
 
 
 # Helper functions for working with model output
-def small_to_zero(x, threshold=1e-3):
+def small_to_zero(x, threshold=1e-2):
     """
     Sets very small values in a numpy matrix to 0
     May modify original array
@@ -271,11 +278,10 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
     basis = basis.exclude({target_word} | extra_exclude)
 
     syntactic_loadings = None
-
     if basis.n_syntactic > 0:
         original_basis = basis
         syntactic_loadings, residuals = fit_all_syntactic(vectors, basis)
-        print(syntactic_loadings)
+        print(syntactic_loadings[vectors.vocab[target_word]])
         vectors = keyedvectors_like(residuals, vectors)
         basis = basis.get_semantic()
 
@@ -283,7 +289,8 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
 
     sparse_embedding = fit_sparse_vector(original_embedding, basis.get_matrix(), alpha)
     if syntactic_loadings is not None:
-        sparse_embedding = np.concatenate((syntactic_loadings, sparse_embedding), axis=1)
+        sparse_embedding = np.concatenate((syntactic_loadings[vectors.vocab[target_word].index], sparse_embedding),
+                                          axis=0)
         basis = original_basis
 
     reconstructed_embedding = np.matmul(sparse_embedding[None, :], basis.get_matrix())

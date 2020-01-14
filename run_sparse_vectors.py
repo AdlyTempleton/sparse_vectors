@@ -10,10 +10,13 @@ from gensim.models import KeyedVectors
 
 
 def run_sparse_vectors(vectors, args):
-    basis = get_top_n_vectors(vectors, args.basis, exclude={})
+    basis = center_normalize_vectors(get_top_n_vectors(vectors, args.basis, exclude={}))
     if args.syntactic is not None:
-        basis = basis.subtract_projection_and_merge(
-            get_pos_basis(vectors).merge(get_syntactic_basis(vectors, args.syntactic).orthogonalize()))
+        basis_syn = get_pca_basis(vectors).merge(get_pos_basis(vectors)).merge(
+            get_syntactic_basis(vectors, args.syntactic))
+        if args.sparse_syn:
+            basis_syn.n_syntactic = 0
+        basis = basis.subtract_projection_and_merge(basis_syn.orthogonalize())
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 
@@ -27,6 +30,9 @@ if __name__ == "__main__":
                         help='Number of words to use as the initial basis vocabulary, before filtering')
     parser.add_argument('--syntactic', type=str, default=None,
                         help='If true, add syntactic vectors from the given filename')
+
+    parser.add_argument('--sparse-syn', action='store_true', default=False,
+                        help='If true, treat syntactic basis with the standard sparse coding')
     parser.add_argument('--input', metavar='I', type=str, default='wiki-news-300d-1M.vec',
                         help='File to read dense embeddings from')
     parser.add_argument('--output', metavar='O', type=str, default=None,
