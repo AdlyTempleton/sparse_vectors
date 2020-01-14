@@ -10,7 +10,8 @@ from gensim.models import KeyedVectors
 
 
 def run_sparse_vectors(vectors, args):
-    basis = center_normalize_vectors(get_top_n_vectors(vectors, args.basis, exclude={}))
+    vectors = center_normalize_vectors(vectors)
+    basis = (get_top_n_vectors(vectors, args.basis, exclude={}))
     if args.syntactic is not None:
         basis_syn = get_pca_basis(vectors).merge(get_pos_basis(vectors)).merge(
             get_syntactic_basis(vectors, args.syntactic))
