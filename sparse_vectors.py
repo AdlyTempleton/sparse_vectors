@@ -227,7 +227,7 @@ def get_top_n_vectors(vectors, n, exclude, do_filter_by_lemma=True, do_normalize
 
 
 # Helper functions for working with model output
-def small_to_zero(x, threshold=1e-2):
+def small_to_zero(x, threshold=1e-3):
     """
     Sets very small values in a numpy matrix to 0
     May modify original array
@@ -278,34 +278,40 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
     basis = basis.exclude({target_word} | extra_exclude)
 
     syntactic_loadings = None
+
+    original_basis = basis
     if basis.n_syntactic > 0:
-        original_basis = basis
         syntactic_loadings, residuals = fit_all_syntactic(vectors, basis)
-        print(syntactic_loadings[vectors.vocab[target_word]])
         vectors = keyedvectors_like(residuals, vectors)
         basis = basis.get_semantic()
 
     original_embedding = vectors[target_word]
 
-    sparse_embedding = fit_sparse_vector(original_embedding, basis.get_matrix(), alpha)
-    if syntactic_loadings is not None:
-        sparse_embedding = np.concatenate((syntactic_loadings[vectors.vocab[target_word].index], sparse_embedding),
-                                          axis=0)
-        basis = original_basis
+    if not isinstance(alpha, list):
+        alpha = [alpha]
 
-    reconstructed_embedding = np.matmul(sparse_embedding[None, :], basis.get_matrix())
+    r_cos, r_nonzero = [], []
+    for a in alpha:
+        sparse_embedding = fit_sparse_vector(original_embedding, basis.get_matrix(), a)
+        if syntactic_loadings is not None:
+            sparse_embedding = np.concatenate((syntactic_loadings[vectors.vocab[target_word].index], sparse_embedding),
+                                              axis=0)
+        reconstructed_embedding = np.matmul(sparse_embedding[np.newaxis, :], original_basis.get_matrix())
 
-    print(word_equation(sparse_embedding, basis, target_word=target_word))
+        # Calculate representation errors
 
-    # Calculate representation errors
+        approximation_error = np.linalg.norm(reconstructed_embedding - original_embedding, 1)
+        approximation_error_L2 = np.linalg.norm(reconstructed_embedding - original_embedding, 2)
+        approximation_error_cos = scipy.spatial.distance.cosine(reconstructed_embedding, original_embedding)
+        r_cos.append(approximation_error_cos)
+        r_nonzero.append(np.count_nonzero(sparse_embedding))
 
-    approximation_error = np.linalg.norm(reconstructed_embedding - original_embedding, 1)
-    approximation_error_L2 = np.linalg.norm(reconstructed_embedding - original_embedding, 2)
-    approximation_error_cos = scipy.spatial.distance.cosine(reconstructed_embedding, original_embedding)
-    print("Reconstruction error {:.2f} (L1) {:.2f} (L2) {:.2f} (cosine)".format(approximation_error,
-                                                                                approximation_error_L2,
-                                                                                approximation_error_cos))
-
+        if len(alpha) == 1:
+            print(word_equation(sparse_embedding, original_basis, target_word=target_word))
+            print("Reconstruction error {:.2f} (L1) {:.2f} (L2) {:.2f} (cosine)".format(approximation_error,
+                                                                                        approximation_error_L2,
+                                                                                        approximation_error_cos))
+    return r_cos, r_nonzero
 
 def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
     target_vector = vectors.syn0[i]
@@ -416,7 +422,7 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     sparse_vectors_list = sum(sparse_vectors_list, [])
 
     # Reform into a matrix
-    sparse_vectors_matrix = np.stack(syntactic_loadings)
+    sparse_vectors_matrix = np.stack(sparse_vectors_list)
     if syntactic_loadings is not None:
         sparse_vectors_matrix = np.concatenate((syntactic_loadings, sparse_vectors_matrix), axis=1)
         basis = original_basis
@@ -424,7 +430,7 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
 
     # Reconstruct the approximation to the original dense vectors represented by the sparse vectors
     print("Reconstructing")
-    reconstructed = keyedvectors_like(np.matmul(sparse_vectors.syn0, basis.get_matrix()))
+    reconstructed = keyedvectors_like(np.matmul(sparse_vectors.syn0, basis.get_matrix()), vectors)
     return sparse_vectors, reconstructed
 
 # vectors = KeyedVectors.load_word2vec_format('wiki-news-300d-1M.vec',limit=100000)
