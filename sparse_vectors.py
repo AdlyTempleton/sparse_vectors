@@ -143,9 +143,7 @@ def get_syntactic_basis(vectors, filename='syntactic.txt'):
 
 
 def center_normalize_vectors(vectors):
-    vectors.vectors = np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True))
-    vectors.vectors_norm = vectors.vectors
-    return vectors
+    return keyedvectors_like(np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True)), vectors)
 
 def get_pos_basis(vectors):
     pos = list(map(lambda word: spacy_nlp(word)[0].pos_, vectors.index2word))
@@ -261,7 +259,7 @@ def word_equation(x, basis, target_word=""):
 # Functions to abstract the model fitting and word equation process
 
 def fit_sparse_vector(target_vector, basis_vectors, alpha=1):
-    model = FistaRegressor(alpha=alpha, max_iter=10)
+    model = FistaRegressor(alpha=alpha, max_iter=100, max_steps=30)
     coefs = model.fit(basis_vectors.transpose(), target_vector)
 
     sparse_vector = small_to_zero(coefs.coef_)
@@ -280,19 +278,19 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
     syntactic_loadings = None
 
     original_basis = basis
+    original_embedding = vectors[target_word]
+
     if basis.n_syntactic > 0:
         syntactic_loadings, residuals = fit_all_syntactic(vectors, basis)
         vectors = keyedvectors_like(residuals, vectors)
         basis = basis.get_semantic()
-
-    original_embedding = vectors[target_word]
 
     if not isinstance(alpha, list):
         alpha = [alpha]
 
     r_cos, r_nonzero = [], []
     for a in alpha:
-        sparse_embedding = fit_sparse_vector(original_embedding, basis.get_matrix(), a)
+        sparse_embedding = fit_sparse_vector(vectors[target_word], basis.get_matrix(), a)
         if syntactic_loadings is not None:
             sparse_embedding = np.concatenate((syntactic_loadings[vectors.vocab[target_word].index], sparse_embedding),
                                               axis=0)
@@ -314,7 +312,7 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
     return r_cos, r_nonzero
 
 def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
-    target_vector = vectors.syn0[i]
+    target_vector = vectors.vectors[i]
     target_word = vectors.index2word[i]
 
     basis_matrix = basis.get_matrix()
