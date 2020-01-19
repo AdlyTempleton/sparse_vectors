@@ -18,6 +18,9 @@ def run_sparse_vectors(vectors, args):
         if args.sparse_syn:
             basis_syn.n_syntactic = 0
         basis = basis.subtract_projection_and_merge(basis_syn.orthogonalize())
+        if args.basis_filter is not None:
+            basis_filter = pickle.load(open(args.basis_filter, 'rb'))
+            basis = basis.select_words(basis_filter)
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 
@@ -27,6 +30,8 @@ if __name__ == "__main__":
                         help='Process the most common N words from the original vocabulary')
     parser.add_argument('--basis', metavar='B', type=int, default=20000,
                         help='Number of words to use as the initial basis vocabulary, before filtering')
+    parser.add_argument('--basis-filter', metavar='BF', type=str, default=None,
+                        help='Filename which contains a filter for a basis')
     parser.add_argument('--alpha', metavar='A', type=float, default=1,
                         help='Number of words to use as the initial basis vocabulary, before filtering')
     parser.add_argument('--syntactic', type=str, default=None,
