@@ -2,6 +2,7 @@ import gensim
 import numpy as np
 import gc
 from gensim.models import KeyedVectors
+import random
 from copy import copy
 import multiprocessing
 from collections import OrderedDict
@@ -54,6 +55,10 @@ class Basis:
 
     def merge(self, other):
         # If this is a pure merge, we have an easy case
+        if len(self) == 0:
+            return other
+        if len(other) == 0:
+            return self
         if not self.is_mixed_syntactic_semantic() and not other.is_mixed_syntactic_semantic():
             # However, we do want to make sure we get the correct order
             if self.n_syntactic == 0 and other.n_syntactic != 0:
@@ -66,7 +71,7 @@ class Basis:
             # Otherwies, we do a bit of 'recursion', merging the semantic and syntactic components
             # And then merging together
             return (self.get_syntactic().merge(other.get_syntactic())).merge(
-                self.get_semantic().merge(other.get_syntactic()))
+                self.get_semantic().merge(other.get_semantic()))
 
     def subtract_projection_and_merge(self, other):
         """Subtracts the projection onto other from self, and merges the two bases
@@ -88,7 +93,7 @@ class Basis:
 
     def slice(self, start, end):
         return Basis(matrix=self.matrix[start:end], words_list=self.words_list[start:end],
-                     n_syntactic=min(0, min(self.n_syntactic, end) - start))
+                     n_syntactic=max(0, min(self.n_syntactic, end) - start))
 
     def get_syntactic(self):
         return self.slice(0, self.n_syntactic)
@@ -104,6 +109,49 @@ class Basis:
             _, residual = fit_to_basis(orthonormal_matrix, vector)
             orthonormal_matrix = np.concatenate((orthonormal_matrix, normalize(residual)), axis=0)
         return Basis(orthonormal_matrix, words_list=self.words_list, n_syntactic=self.n_syntactic)
+
+    def select(self, indices):
+        return Basis(words_list=[self.words_list[i] for i in indices], matrix=self.matrix[indices, :],
+                     n_syntactic=len([x for x in indices if x < self.n_syntactic]))
+
+    def select_words(self, words_list):
+        return self.select([self.words_inv[w] for w in words_list])
+
+    def sample(self, p):
+        if self.n_syntactic > 0:
+            return self.get_syntactic().merge(self.get_semantic().sample(p))
+        else:
+            k = int(p * len(self))
+            indices = random.sample(range(len(self)), k)
+            return self.select(indices)
+
+    def filter_maximum_distinct(self, n):
+        basis = self.get_syntactic()
+        while len(basis) < n:
+            i = np.argmin(np.max(np.matmul(self.matrix, np.transpose(basis.matrix)), axis=1), axis=0)
+            basis = basis.merge(self.slice(i, i + 1))
+        return basis
+
+    def filter_vocab_guided(self, vectors, n):
+        basis = self.get_syntactic()
+        weights_by_vector = 1 - np.max(np.abs(np.matmul(vectors.vectors, np.transpose(basis.matrix))), axis=1)
+        basis_vector_sim = np.abs(np.matmul(self.matrix, np.transpose(vectors.vectors)))
+        basis_vector_sim[0:len(basis), :] = 0
+        while len(basis) < n:
+            weighted_similarities = np.mean(weights_by_vector * basis_vector_sim, axis=1)
+            i = np.argmax(weighted_similarities)
+            # Add to new basis
+            basis = basis.merge(basis.slice(i, i + 1))
+            # Decrease appropriate weights
+            weights_by_vector = np.minimum(1 - np.abs(basis_vector_sim[i, :]), weights_by_vector)
+            # Exclude this basis from being picked
+            basis_vector_sim[i, :] = 0
+        return basis
+
+    def make_semantic(self):
+        b = copy(self)
+        b.n_syntactic = 0
+
 
 def get_syntactic_basis(vectors, filename='syntactic.txt'):
     # Files are formatted with headers, starting with <, and then a list of pairs of words (command-seperated)
@@ -252,8 +300,10 @@ def word_equation(x, basis, target_word=""):
 
     nonzero_indices = x.nonzero()
     nonzero_indices_list = nonzero_indices[0].tolist()
-    return target_word + ' = ' + " + ".join(
-        ["{:.2f} * {}".format(x[i], basis.get_words_list()[i]) for i in nonzero_indices_list])
+    terms = ["{:.2f} * {}".format(x[i], basis.get_words_list()[i]) for i in nonzero_indices_list]
+    # sort terms by decreasing weight
+    terms = [x[1] for x in sorted(zip([abs(x[i]) for i in nonzero_indices_list], terms), reverse=True)]
+    return target_word + ' = ' + " + ".join(terms)
 
 
 # Functions to abstract the model fitting and word equation process
