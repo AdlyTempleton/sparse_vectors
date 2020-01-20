@@ -11,7 +11,7 @@ from gensim.models import KeyedVectors
 
 def run_sparse_vectors(vectors, args):
     vectors = center_normalize_vectors(vectors)
-    basis = (get_top_n_vectors(vectors, args.basis, exclude={}))
+    basis = (get_top_n_vectors(vectors, args.basis if args.basis_filter is None else 50000, exclude={}))
     if args.syntactic is not None:
         basis_syn = get_pca_basis(vectors).merge(get_pos_basis(vectors)).merge(
             get_syntactic_basis(vectors, args.syntactic))
@@ -21,6 +21,8 @@ def run_sparse_vectors(vectors, args):
         if args.basis_filter is not None:
             basis_filter = pickle.load(open(args.basis_filter, 'rb'))
             basis = basis.select_words(basis_filter)
+            if args.basis < len(basis):
+                basis = basis.slice(0, args.basis)
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 
