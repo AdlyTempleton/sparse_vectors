@@ -152,6 +152,15 @@ class Basis:
         b = copy(self)
         b.n_syntactic = 0
 
+def keyedvector_filter(vectors, filter):
+    """Returns a vectors object containing only lowercase entries from the original object"""
+    filtered = copy(vectors)
+    filtered_indices, filtered_words = zip(*[(i, s) for i, s in enumerate(vectors.index2word) if filter(s)])
+    filtered.index2word = filtered_words
+    filtered.vectors = vectors.vectors[filtered_indices, :]
+    if vectors.vectors_norm is not None:
+        filtered.vectors_norm = vectors.vectors_norm[filtered_indices, :]
+    return filtered
 
 def get_syntactic_basis(vectors, filename='syntactic.txt'):
     # Files are formatted with headers, starting with <, and then a list of pairs of words (command-seperated)

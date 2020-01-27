@@ -8,7 +8,6 @@ import pickle
 
 from gensim.models import KeyedVectors
 
-
 def run_sparse_vectors(vectors, args):
     vectors = center_normalize_vectors(vectors)
     basis = (get_top_n_vectors(vectors, args.basis if args.basis_filter is None else 50000, exclude={}))
@@ -20,9 +19,9 @@ def run_sparse_vectors(vectors, args):
         basis = basis.subtract_projection_and_merge(basis_syn.orthogonalize())
         if args.basis_filter is not None:
             basis_filter = pickle.load(open(args.basis_filter, 'rb'))
+            if args.basis < len(basis_filter):
+                basis_filter = basis_filter[:args.basis]
             basis = basis.select_words(basis_filter)
-            if args.basis < len(basis):
-                basis = basis.slice(0, args.basis)
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 
