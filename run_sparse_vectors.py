@@ -46,9 +46,10 @@ if __name__ == "__main__":
                         help='File to which to save sparse embeddings')
     args = parser.parse_args()
 
-    output_file = args.output if args.output is not None else 'sparse_vectors{}-{}-{}-{}'.format(
-        '-' + args.syntactic if args.syntactic is not None else ''
-        , args.vocab, args.basis, args.alpha)
+    output_file = args.output if args.output is not None else 'sparse_vectors{}{}-{}-{}-{}'.format(
+        '-' + args.syntactic if args.syntactic is not None else '',
+        '-sparsesyn' if args.sparse_syn is not None else '',
+    , args.vocab, args.basis, args.alpha)
 
     vectors = KeyedVectors.load_word2vec_format(args.input, limit=args.vocab)
     basis, (sparse_vectors, reconstructed_vectors) = run_sparse_vectors(vectors, args)
