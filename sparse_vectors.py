@@ -1,6 +1,5 @@
 import gensim
 import numpy as np
-import cupy as cp
 import gc
 from gensim.models import KeyedVectors
 import random
@@ -63,7 +62,7 @@ class KeyedVectorsPlus(KeyedVectors):
         """Creates a new gensim.KeyedVectors with the same vocabulary as old_vectors but with the embedding matrix of vector_matrix"""
         new_vectors = copy(self)
         new_vectors.vectors = cp.asarray(vector_matrix) if do_cupy else vector_matrix
-        vectors_norm = normalize(vector_matrix) if do_norm else vector_matrix
+        vectors_norm = sklearn.preprocessing.normalize(vector_matrix) if do_norm else vector_matrix
         new_vectors.vectors_norm = cp.asarray(vectors_norm) if do_cupy else vectors_norm
         new_vectors.vector_size = new_vectors.vectors.shape[1]
         return new_vectors
@@ -89,7 +88,7 @@ class Basis:
         matrix is a ndarray"""
         # The number of basis vectors which make up the 'syntactic' basis. These are always at the front
         self.n_syntactic = n_syntactic
-        assert isinstance(matrix, cp.core.core.ndarray) or isinstance(matrix, np.ndarray)
+        # assert isinstance(matrix, cp.core.core.ndarray) or isinstance(matrix, np.ndarray)
         self.matrix = matrix
         assert (words_list is None) != (gensim_vocab is None)
         if words_list is not None:
@@ -142,7 +141,8 @@ class Basis:
         """Subtracts the projection onto other from self, and merges the two bases
         Used to combine a syntactic and a semantic basis"""
         _, residuals = fit_to_basis(other.matrix, self.matrix)
-        return Basis(normalize(residuals), words_list=self.words_list, n_syntactic=self.n_syntactic).merge(other)
+        return Basis(sklearn.preprocessing.normalize(residuals), words_list=self.words_list,
+                     n_syntactic=self.n_syntactic).merge(other)
 
     def __len__(self):
         return len(self.words_list)
@@ -168,11 +168,11 @@ class Basis:
 
     def orthogonalize(self):
         """Iteratively creates an orthonormal basis via the gram schmidt process"""
-        orthonormal_matrix = normalize(self.matrix[np.newaxis, 0, :])
+        orthonormal_matrix = sklearn.preprocessing.normalize(self.matrix[np.newaxis, 0, :])
         for i in range(1, len(self)):
             vector = self.matrix[np.newaxis, i, :]
             _, residual = fit_to_basis(orthonormal_matrix, vector)
-            orthonormal_matrix = np.concatenate((orthonormal_matrix, normalize(residual)), axis=0)
+            orthonormal_matrix = np.concatenate((orthonormal_matrix, sklearn.preprocessing.normalize(residual)), axis=0)
         return Basis(orthonormal_matrix, words_list=self.words_list, n_syntactic=self.n_syntactic)
 
     def select(self, indices):
@@ -209,6 +209,7 @@ class Basis:
         basis_vector_sim[0:len(basis), :] = 0
 
         if use_cupy:
+            import cupy as cp
             weights_by_vector, basis_vector_sim = cp.asarray(weights_by_vector, dtype=cp.float16), cp.asarray(
                 basis_vector_sim, dtype=cp.float16)
 
@@ -279,7 +280,7 @@ def get_syntactic_basis(vectors, filename='syntactic.txt'):
 
 
 def center_normalize_vectors(vectors):
-    np = xp(vectors.vectors)
+    #np = xp(vectors.vectors)
     return vectors.like(np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True)))
 
 
@@ -310,7 +311,7 @@ def get_pca_basis(vectors):
     pca = PCA(n_components=1)
     pca.fit(vectors.vectors)
     return Basis(
-        matrix=normalize(pca.components_),
+        matrix=sklearn.preprocessing.normalize(pca.components_),
         words_list=['<<<C0>>>'], n_syntactic=1)
 
 
@@ -366,7 +367,7 @@ def get_top_n_vectors(vectors, n, exclude, do_filter_by_lemma=True, do_normalize
     words = list(vocab_filtered.keys())
     m = np.stack(list(map(vectors.get_vector, words)))
     if do_normalize:
-        m = normalize(m)
+        m = sklearn.preprocessing.normalize(m)
     return Basis(m, words_list=words)
 
 
