@@ -1,18 +1,19 @@
-name: py35
+name: py36
 channels:
   - pytorch
   - numba/label/dev
   - conda-forge
   - defaults
 dependencies:
-  - python=3.5.5
+  - python=3.6
   - tqdm=4.40.2
   - numpy=1.12.1
   - gensim=3.5.0
   - nltk=3.3.0
+  - cupy=6.0.0
   #- pytorch=1.3.1
   - spacy=2.0.12
   - sklearn-contrib-lightning=0.4.0
   - scipy=1.1.0
-prefix: C:\Users\Adly\Anaconda3\envs\py35
+prefix: C:\Users\Adly\Anaconda3\envs\py37
 

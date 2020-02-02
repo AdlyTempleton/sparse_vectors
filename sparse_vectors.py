@@ -1,5 +1,6 @@
 import gensim
 import numpy as np
+import cupy as cp
 import gc
 from gensim.models import KeyedVectors
 import random
@@ -13,15 +14,73 @@ import lightning
 import sys
 from lightning.regression import FistaRegressor
 import spacy
-from sklearn.preprocessing import normalize
 import math
 import scipy
 import tqdm
 
 from sklearn.decomposition import PCA
+import en_core_web_sm
+
 # Load pretrained fastText vectors
 
-spacy_nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
+spacy_nlp = en_core_web_sm.load(disable=['parser', 'ner'])
+
+
+def xp(x):
+    return cp.get_array_module(x)
+
+
+def normalize(x):
+    return x / xp(x).linalg.norm(x, axis=1, keepdims=True)
+
+
+class KeyedVectorsPlus(KeyedVectors):
+    """Implements some additional methods and comparibility fixes from KeyedVectors"""
+
+    def __init__(self, a):
+
+        super(KeyedVectorsPlus, self).__init__(vector_size=a.vector_size)
+        self.vectors = a.vectors
+        self.vectors_norm = a.vectors_norm
+        self.vocab = a.vocab
+        self.index2entity = a.index2word
+        self.index2entity = a.index2entity
+
+    def word_vec(self, word, use_norm=False):
+        """Overwrite to remove cupy-breaking setflags call"""
+        if word in self.vocab:
+            if use_norm:
+                result = self.vectors_norm[self.vocab[word].index]
+            else:
+                result = self.vectors[self.vocab[word].index]
+
+            # result.setflags(write=False)
+            return result
+        else:
+            raise KeyError("word '%s' not in vocabulary" % word)
+
+    def like(self, vector_matrix, do_norm=True, do_cupy=False):
+        """Creates a new gensim.KeyedVectors with the same vocabulary as old_vectors but with the embedding matrix of vector_matrix"""
+        new_vectors = copy(self)
+        new_vectors.vectors = cp.asarray(vector_matrix) if do_cupy else vector_matrix
+        vectors_norm = normalize(vector_matrix) if do_norm else vector_matrix
+        new_vectors.vectors_norm = cp.asarray(vectors_norm) if do_cupy else vectors_norm
+        new_vectors.vector_size = new_vectors.vectors.shape[1]
+        return new_vectors
+
+    def to_cupy(self):
+        return self.like(self.vectors, do_cupy=True)
+
+    def filter(self, filter):
+        """Returns a vectors object containing only lowercase entries from the original object"""
+        filtered = copy(self)
+        filtered_indices, filtered_words = zip(*[(i, s) for i, s in enumerate(self.index2word) if filter(s)])
+        filtered.index2word = filtered_words
+
+        filtered.vectors = self.vectors[list(filtered_indices), :]
+        if self.vectors_norm is not None:
+            filtered.vectors_norm = self.vectors_norm[list(filtered_indices), :]
+        return filtered
 
 
 class Basis:
@@ -30,7 +89,7 @@ class Basis:
         matrix is a ndarray"""
         # The number of basis vectors which make up the 'syntactic' basis. These are always at the front
         self.n_syntactic = n_syntactic
-        assert isinstance(matrix, np.ndarray)
+        assert isinstance(matrix, cp.core.core.ndarray) or isinstance(matrix, np.ndarray)
         self.matrix = matrix
         assert (words_list is None) != (gensim_vocab is None)
         if words_list is not None:
@@ -52,6 +111,12 @@ class Basis:
 
     def get_vector(self, word):
         return self.matrix[self.words_inv[word]]
+
+    def to_numpy(self):
+        if isinstance(self.matrix, np.ndarray):
+            return self
+        else:
+            return Basis(matrix=self.matrix.get(), words_list=self.words_list, n_syntactic=self.n_syntactic)
 
     def merge(self, other):
         # If this is a pure merge, we have an easy case
@@ -92,7 +157,7 @@ class Basis:
         return Basis(matrix=new_matrix, words_list=new_words_list, n_syntactic=self.n_syntactic)
 
     def slice(self, start, end):
-        return Basis(matrix=self.matrix[start:end], words_list=self.words_list[start:end],
+        return Basis(matrix=self.matrix[start:end, :], words_list=self.words_list[start:end],
                      n_syntactic=max(0, min(self.n_syntactic, end) - start))
 
     def get_syntactic(self):
@@ -114,8 +179,13 @@ class Basis:
         return Basis(words_list=[self.words_list[i] for i in indices], matrix=self.matrix[indices, :],
                      n_syntactic=len([x for x in indices if x < self.n_syntactic]))
 
-    def select_words(self, words_list):
-        return self.select([self.words_inv[w] for w in words_list])
+    def select_words(self, words_list, ignore_missing=False):
+        if ignore_missing:
+            our_words_set = set(self.words_list)
+            words_list = [x for x in words_list if x in our_words_set]
+        indices = [self.words_inv[w] for w in words_list]
+        print(indices)
+        return self.select(indices)
 
     def sample(self, p):
         if self.n_syntactic > 0:
@@ -132,35 +202,44 @@ class Basis:
             basis = basis.merge(self.slice(i, i + 1))
         return basis
 
-    def filter_vocab_guided(self, vectors, n):
+    def filter_vocab_guided(self, vectors, n, verbose=False, use_cupy=True):
         basis = self.get_syntactic()
         weights_by_vector = 1 - np.max(np.abs(np.matmul(vectors.vectors, np.transpose(basis.matrix))), axis=1)
         basis_vector_sim = np.abs(np.matmul(self.matrix, np.transpose(vectors.vectors)))
         basis_vector_sim[0:len(basis), :] = 0
+
+        if use_cupy:
+            weights_by_vector, basis_vector_sim = cp.asarray(weights_by_vector, dtype=cp.float16), cp.asarray(
+                basis_vector_sim, dtype=cp.float16)
+
+        xp = cp if use_cupy else np
+
         while len(basis) < n:
-            weighted_similarities = np.mean(weights_by_vector * basis_vector_sim, axis=1)
-            i = np.argmax(weighted_similarities)
+            if verbose:
+                print(len(basis))
+            weighted_similarities = xp.mean(weights_by_vector * basis_vector_sim, axis=1)
+            i = int(xp.argmax(weighted_similarities))
             # Add to new basis
-            basis = basis.merge(basis.slice(i, i + 1))
+            basis = basis.merge(self.slice(i, i + 1).to_numpy())
             # Decrease appropriate weights
-            weights_by_vector = np.minimum(1 - np.abs(basis_vector_sim[i, :]), weights_by_vector)
+            weights_by_vector = xp.minimum(1 - xp.abs(basis_vector_sim[i, :]), weights_by_vector)
             # Exclude this basis from being picked
             basis_vector_sim[i, :] = 0
+        del weighted_similarities
+        del weights_by_vector
+        del basis_vector_sim
         return basis
+
+    def filter_good_words(self):
+        filter_fn = lambda w: spacy_nlp(w)[0].pos_ in {'NOUN', 'VERB', 'ADJ'} and w in spacy_nlp.vocab and w.islower()
+        return self.get_syntactic().merge(self.select([i for i, w in enumerate(self.words_list) if filter_fn(w)]))
 
     def make_semantic(self):
         b = copy(self)
         b.n_syntactic = 0
 
-def keyedvector_filter(vectors, filter):
-    """Returns a vectors object containing only lowercase entries from the original object"""
-    filtered = copy(vectors)
-    filtered_indices, filtered_words = zip(*[(i, s) for i, s in enumerate(vectors.index2word) if filter(s)])
-    filtered.index2word = filtered_words
-    filtered.vectors = vectors.vectors[filtered_indices, :]
-    if vectors.vectors_norm is not None:
-        filtered.vectors_norm = vectors.vectors_norm[filtered_indices, :]
-    return filtered
+
+
 
 def get_syntactic_basis(vectors, filename='syntactic.txt'):
     # Files are formatted with headers, starting with <, and then a list of pairs of words (command-seperated)
@@ -178,7 +257,7 @@ def get_syntactic_basis(vectors, filename='syntactic.txt'):
             total_matrix = np.stack(vector_diffs, axis=0)
             basis_vectors.append(np.mean(total_matrix, axis=0))
             # We want to take the elementwise minimum absolute value along axis 0
-            #basis_vectors.append(total_matrix[np.argmin(np.abs(total_matrix), axis=0),np.arange(total_matrix.shape[1])])
+            # basis_vectors.append(total_matrix[np.argmin(np.abs(total_matrix), axis=0),np.arange(total_matrix.shape[1])])
 
         for line in file:
             if line[0] == '<':
@@ -200,14 +279,16 @@ def get_syntactic_basis(vectors, filename='syntactic.txt'):
 
 
 def center_normalize_vectors(vectors):
-    return keyedvectors_like(np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True)), vectors)
+    np = xp(vectors.vectors)
+    return vectors.like(np.subtract(vectors.vectors, np.mean(vectors.vectors, axis=0, keepdims=True)))
+
 
 def get_pos_basis(vectors):
     pos = list(map(lambda word: spacy_nlp(word)[0].pos_, vectors.index2word))
     # Get unique parts of speech and create an inverse index
     # Order matters herer because it becomes the order of orthogonalization
     pos_groups = OrderedDict()
-    for p in ['NOUN', 'VERB', 'ADJ', 'ADV', 'NUM']:
+    for p in ['NOUN', 'VERB', 'ADJ', 'ADV', 'PROPN', 'NUM']:
         pos_groups[p] = []
     for i, x in enumerate(pos):
         if x in pos_groups:
@@ -220,6 +301,11 @@ def get_pos_basis(vectors):
     return Basis(pos_mean_vectors, words_list=pos_names_list, n_syntactic=len(pos_names_list))
 
 
+def get_capitalization_basis(vectors):
+    cap_vector = np.mean(vectors.filter(lambda w: w[0].isupper()).vectors, axis=0, keepdims=True)
+    return Basis(cap_vector, words_list=['<<<CAPITALIZATION>>>'], n_syntactic=1)
+
+
 def get_pca_basis(vectors):
     pca = PCA(n_components=1)
     pca.fit(vectors.vectors)
@@ -227,9 +313,12 @@ def get_pca_basis(vectors):
         matrix=normalize(pca.components_),
         words_list=['<<<C0>>>'], n_syntactic=1)
 
+
 def get_combined_syntactic_basis(vectors, syntactic_filename='syntactic.txt'):
-    return get_pca_basis(vectors).merge(get_pos_basis(vectors)).merge(
-        get_syntactic_basis(vectors, filename=syntactic_filename)).orthogonalize()
+    return get_pca_basis(vectors).merge(get_capitalization_basis(vectors)) \
+        .merge(get_pos_basis(vectors)) \
+        .merge(get_syntactic_basis(vectors, filename=syntactic_filename)) \
+        .orthogonalize()
 
 
 def filter_by_lemma(vocab_dict, exclude=set()):
@@ -275,7 +364,7 @@ def get_top_n_vectors(vectors, n, exclude, do_filter_by_lemma=True, do_normalize
     # Remove excluded words
     vocab_filtered = {k: v for k, v in vocab_filtered.items() if k not in exclude}
     words = list(vocab_filtered.keys())
-    m = np.stack(map(vectors.get_vector, words))
+    m = np.stack(list(map(vectors.get_vector, words)))
     if do_normalize:
         m = normalize(m)
     return Basis(m, words_list=words)
@@ -329,7 +418,7 @@ def fit_sparse_vector(target_vector, basis_vectors, alpha=1):
     return sparse_vector.squeeze(0)
 
 
-def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
+def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set(), sparse_syn=True):
     """Designed to be called primarily from a notebook"""
     # Preliminary regression
     basis = basis.exclude({target_word} | extra_exclude)
@@ -338,10 +427,10 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
 
     original_basis = basis
     original_embedding = vectors[target_word]
+    vector_to_embed = original_embedding
 
-    if basis.n_syntactic > 0:
-        syntactic_loadings, residuals = fit_all_syntactic(vectors, basis)
-        vectors = keyedvectors_like(residuals, vectors)
+    if basis.n_syntactic > 0 and not sparse_syn:
+        syntactic_loadings, vector_to_embed = fit_all_syntactic(original_embedding, basis)
         basis = basis.get_semantic()
 
     if not isinstance(alpha, list):
@@ -349,9 +438,9 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
 
     r_cos, r_nonzero = [], []
     for a in alpha:
-        sparse_embedding = fit_sparse_vector(vectors[target_word], basis.get_matrix(), a)
+        sparse_embedding = fit_sparse_vector(vector_to_embed, basis.get_matrix(), a)
         if syntactic_loadings is not None:
-            sparse_embedding = np.concatenate((syntactic_loadings[vectors.vocab[target_word].index], sparse_embedding),
+            sparse_embedding = np.concatenate((syntactic_loadings, sparse_embedding),
                                               axis=0)
         reconstructed_embedding = np.matmul(sparse_embedding[np.newaxis, :], original_basis.get_matrix())
 
@@ -369,6 +458,7 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set()):
                                                                                         approximation_error_L2,
                                                                                         approximation_error_cos))
     return r_cos, r_nonzero
+
 
 def fit_ith_sparse_vector_excluding_self(vectors, basis, alpha, i):
     target_vector = vectors.vectors[i]
@@ -417,14 +507,6 @@ def get_chunks(n, m):
     return zip([0] + chunk_boundaries, chunk_boundaries)
 
 
-def keyedvectors_like(vector_matrix, old_vectors, do_norm=True):
-    """Creates a new gensim.KeyedVectors with the same vocabulary as old_vectors but with the embedding matrix of vector_matrix"""
-    new_vectors = copy(old_vectors)
-    new_vectors.vectors = vector_matrix
-    new_vectors.vectors_norm = normalize(vector_matrix) if do_norm else vector_matrix
-    new_vectors.vector_size = new_vectors.vectors.shape[1]
-    return new_vectors
-
 
 def fit_to_basis(basis_matrix, vectors_matrix):
     """Fits a single vector to a syntactic basis"""
@@ -456,7 +538,7 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     syntactic_loadings = None
     if basis.n_syntactic > 0:
         syntactic_loadings, residuals = fit_all_syntactic(vectors, basis)
-        vectors = keyedvectors_like(residuals, vectors)
+        vectors = vectors.like(residuals)
 
         original_basis = basis
         basis = basis.get_semantic()
@@ -483,11 +565,10 @@ def fit_all_vectors(vectors, basis, alpha, reconstructed=False):
     if syntactic_loadings is not None:
         sparse_vectors_matrix = np.concatenate((syntactic_loadings, sparse_vectors_matrix), axis=1)
         basis = original_basis
-    sparse_vectors = keyedvectors_like(sparse_vectors_matrix, vectors)
-
+    sparse_vectors = vectors.like(sparse_vectors_matrix)
     # Reconstruct the approximation to the original dense vectors represented by the sparse vectors
     print("Reconstructing")
-    reconstructed = keyedvectors_like(np.matmul(sparse_vectors.syn0, basis.get_matrix()), vectors)
+    reconstructed = vectors.like(np.matmul(sparse_vectors.syn0, basis.get_matrix()))
     return sparse_vectors, reconstructed
 
 # vectors = KeyedVectors.load_word2vec_format('wiki-news-300d-1M.vec',limit=100000)
