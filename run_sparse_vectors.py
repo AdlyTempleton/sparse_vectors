@@ -17,11 +17,11 @@ def run_sparse_vectors(vectors, args):
         if args.sparse_syn:
             basis_syn.n_syntactic = 0
         basis = basis.subtract_projection_and_merge(basis_syn.orthogonalize())
-        if args.basis_filter is not None:
-            basis_filter = pickle.load(open(args.basis_filter, 'rb'))
-            if args.basis < len(basis_filter):
-                basis_filter = basis_filter[:args.basis]
-            basis = basis.select_words(basis_filter)
+    if args.basis_filter is not None:
+        basis_filter = pickle.load(open(args.basis_filter, 'rb'))
+        if args.basis < len(basis_filter):
+            basis_filter = basis_filter[:args.basis]
+        basis = basis.select_words(basis_filter)
     return basis, fit_all_vectors(vectors, basis, alpha=args.alpha)
 
 
