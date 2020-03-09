@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     output_file = args.output if args.output is not None else 'sparse_vectors{}{}-{}-{}-{}'.format(
         '-' + args.basis_filter if args.basis_filter is not None else '',
-        '-sparsesyn' if args.sparse_syn is not None else '',
+        '-sparsesyn' if args.sparse_syn is not False else '',
         args.vocab, args.basis, args.alpha)
 
     vectors = KeyedVectorsPlus(KeyedVectors.load_word2vec_format(args.input, limit=args.vocab))

@@ -71,7 +71,7 @@ class KeyedVectorsPlus(KeyedVectors):
         return self.like(self.vectors, do_cupy=True)
 
     def filter(self, filter):
-        """Returns a vectors object containing only lowercase entries from the original object"""
+        """Returns a vectors object containing only entries which match the filter"""
         filtered = copy(self)
         filtered_indices, filtered_words = zip(*[(i, s) for i, s in enumerate(self.index2word) if filter(s)])
         filtered.index2word = filtered_words
@@ -231,6 +231,9 @@ class Basis:
         del basis_vector_sim
         return basis
 
+    def filter_random(self, n):
+        return self.sample((n - self.n_syntactic) / (len(self) - self.n_syntactic))
+
     def filter_good_words(self):
         filter_fn = lambda w: spacy_nlp(w)[0].pos_ in {'NOUN', 'VERB', 'ADJ'} and w in spacy_nlp.vocab and w.islower()
         return self.get_syntactic().merge(self.select([i for i, w in enumerate(self.words_list) if filter_fn(w)]))
@@ -385,7 +388,7 @@ def small_to_zero(x, threshold=1e-3):
     return x
 
 
-def word_equation(x, basis, target_word=""):
+def word_equation(x, basis, target_word="", max_terms=-1, latex=False):
     """Given a sparse coefficient matrix embedding a word, returns a human-readable
     string containing a word vector equation
 
@@ -399,10 +402,32 @@ def word_equation(x, basis, target_word=""):
 
     nonzero_indices = x.nonzero()
     nonzero_indices_list = nonzero_indices[0].tolist()
-    terms = ["{:.2f} * {}".format(x[i], basis.get_words_list()[i]) for i in nonzero_indices_list]
+    terms = [("{:.2f} * \\text{{{}}}" if latex else "{:.2f} * {}")
+                 .format(x[i], basis.get_words_list()[i]) for i in nonzero_indices_list]
+
     # sort terms by decreasing weight
     terms = [x[1] for x in sorted(zip([abs(x[i]) for i in nonzero_indices_list], terms), reverse=True)]
-    return target_word + ' = ' + " + ".join(terms)
+    if max_terms != -1 and len(terms) > max_terms:
+        terms = terms[:max_terms]
+
+    # Join terms together while adding latex linebreaks if latex is enabled
+    joined = ""
+    for i, term in enumerate(terms):
+        if i != 0:
+            if latex and i % 3 == 0:
+                if i != 3:
+                    joined += '\\nonumber'
+                joined += '\\\\\n&'
+            joined += " + "
+        joined += term
+
+    if latex:
+        joined = joined.replace('<', '').replace('>', '').replace('+ -', '-')
+        target_word = '\\text{{{}}}'.format(target_word)
+    r = target_word + (' &= ' if latex else ' = ') + joined
+    if latex:
+        r = '\\begin{{align}}\n{}\n\\end{{align}}'.format(r)
+    return r
 
 
 # Functions to abstract the model fitting and word equation process

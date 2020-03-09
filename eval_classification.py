@@ -83,7 +83,7 @@ def train_logistic_regression(X, Y, X_test, Y_test, basis):
     print(lr.score(X_test, Y_test))
     if basis is not None:
         for d in range(lr.coef_.shape[0]):
-            print(sparse_vectors.word_equation(lr.coef_[d, :], basis))
+            print(sparse_vectors.word_equation(lr.coef_[d, :], basis, max_terms=30))
 
 
 def train_imdb(vectors, basis):
