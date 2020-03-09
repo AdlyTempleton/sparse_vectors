@@ -184,7 +184,6 @@ class Basis:
             our_words_set = set(self.words_list)
             words_list = [x for x in words_list if x in our_words_set]
         indices = [self.words_inv[w] for w in words_list]
-        print(indices)
         return self.select(indices)
 
     def sample(self, p):

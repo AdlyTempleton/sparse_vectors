@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument('--output', metavar='O', type=str, default=None,
                         help='File to which to save sparse embeddings')
     args = parser.parse_args()
-
+    print(args)
     output_file = args.output if args.output is not None else 'sparse_vectors{}{}-{}-{}-{}'.format(
         '-' + args.basis_filter if args.basis_filter is not None else '',
         '-sparsesyn' if args.sparse_syn is not False else '',
