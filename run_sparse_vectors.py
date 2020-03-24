@@ -35,7 +35,7 @@ if __name__ == "__main__":
                         help='Filename which contains a filter for a basis')
     parser.add_argument('--alpha', metavar='A', type=float, default=1,
                         help='Number of words to use as the initial basis vocabulary, before filtering')
-    parser.add_argument('--syntactic', type=str, default='syntactic.txt',
+    parser.add_argument('--syntactic', type=str, default=None,
                         help='If not None, add syntactic vectors from the given filename')
 
     parser.add_argument('--sparse-syn', action='store_true', default=False,

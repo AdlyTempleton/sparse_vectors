@@ -10,7 +10,7 @@ import pickle
 import sparse_vectors
 
 
-def add_line_to_dataset(sentence, label, dim, X, Y):
+def add_line_to_dataset(vectors, sentence, label, dim, X, Y):
     sentence = sentence.replace("<br />", "")
     sentence = sentence.translate(str.maketrans('', '', string.punctuation)).lower()
     # row = scipy.sparse.dok_matrix((1,n_vectors))
@@ -35,13 +35,13 @@ def imdb_dataset(vectors, parent_dir):
     for file in os.listdir(os.path.join(parent_dir, 'pos')):
         try:
             line = open(os.path.join(parent_dir, 'pos', file), 'r').readline()
-            add_line_to_dataset(line, 1, dim, X, labels)
+            add_line_to_dataset(vectors, line, 1, dim, X, labels)
         except UnicodeDecodeError:
             print("Skipping {}; unicode error".format(file))
     for file in os.listdir(os.path.join(parent_dir, 'neg')):
         try:
             line = open(os.path.join(parent_dir, 'neg', file), 'r').readline()
-            add_line_to_dataset(line, 0, dim, X, labels)
+            add_line_to_dataset(vectors, line, 0, dim, X, labels)
         except UnicodeDecodeError:
             print("Skipping {}; unicode error".format(file))
     #
@@ -63,7 +63,7 @@ def trec_dataset(vectors, filename, labels_map=None):
 
     for row in csv_reader:
         question, label = row[2], row[1]
-        add_line_to_dataset(question, label, dim, X, labels)
+        add_line_to_dataset(vectors, question, label, dim, X, labels)
     X = np.stack(X, axis=0)
 
     if labels_map is None:
@@ -80,17 +80,18 @@ def train_logistic_regression(X, Y, X_test, Y_test, basis):
     lr = LogisticRegressionCV(n_jobs=4)
     lr.fit(X, Y)
     print(lr.score(X, Y))
-    print(lr.score(X_test, Y_test))
+    r = lr.score(X_test, Y_test)
+    print(r)
     if basis is not None:
         for d in range(lr.coef_.shape[0]):
             print(sparse_vectors.word_equation(lr.coef_[d, :], basis, max_terms=30))
-
+    return r
 
 def train_imdb(vectors, basis):
     print("IMDB")
     X, Y = imdb_dataset(vectors, os.path.join('aclImdb', 'train'))
     X_test, Y_test = imdb_dataset(vectors, os.path.join('aclImdb', 'test'))
-    train_logistic_regression(X, Y, X_test, Y_test, basis)
+    return train_logistic_regression(X, Y, X_test, Y_test, basis)
 
 
 def train_trec(vectors, basis):
