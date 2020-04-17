@@ -387,7 +387,7 @@ def small_to_zero(x, threshold=1e-3):
     return x
 
 
-def word_equation(x, basis, target_word="", max_terms=-1, latex=False):
+def word_equation(x, basis, target_word="", max_terms=-1, latex=False, latex_one_column=False):
     """Given a sparse coefficient matrix embedding a word, returns a human-readable
     string containing a word vector equation
 
@@ -401,7 +401,7 @@ def word_equation(x, basis, target_word="", max_terms=-1, latex=False):
 
     nonzero_indices = x.nonzero()
     nonzero_indices_list = nonzero_indices[0].tolist()
-    terms = [("{:.2f} * \\text{{{}}}" if latex else "{:.2f} * {}")
+    terms = [("{:.2g} * \\text{{{}}}" if latex else "{:.2g} * {}")
                  .format(x[i], basis.get_words_list()[i]) for i in nonzero_indices_list]
 
     # sort terms by decreasing weight
@@ -413,8 +413,8 @@ def word_equation(x, basis, target_word="", max_terms=-1, latex=False):
     joined = ""
     for i, term in enumerate(terms):
         if i != 0:
-            if latex and i % 3 == 0:
-                if i != 3:
+            if (latex and not latex_one_column and i % 3 == 0) or (latex and latex_one_column and i % 2 == 1):
+                if i != 3 or latex_one_column:
                     joined += '\\nonumber'
                 joined += '\\\\\n&'
             joined += " + "
@@ -423,7 +423,8 @@ def word_equation(x, basis, target_word="", max_terms=-1, latex=False):
     if latex:
         joined = joined.replace('<', '').replace('>', '').replace('+ -', '-')
         target_word = '\\text{{{}}}'.format(target_word)
-    r = target_word + (' &= ' if latex else ' = ') + joined
+    r = ('{} = {}' if not latex else ('&{} = {}\\nonumber' if latex_one_column else '{} &= {}')).format(target_word,
+                                                                                                        joined)
     if latex:
         r = '\\begin{{align}}\n{}\n\\end{{align}}'.format(r)
     return r
@@ -479,7 +480,7 @@ def fit_and_report(vectors, target_word, basis, alpha, extra_exclude=set(), spar
 
         if len(alpha) == 1:
             print(word_equation(sparse_embedding, original_basis, target_word=target_word))
-            print("Reconstruction error {:.2f} (L1) {:.2f} (L2) {:.2f} (cosine)".format(approximation_error,
+            print("Reconstruction error {:.2g} (L1) {:.2g} (L2) {:.2g} (cosine)".format(approximation_error,
                                                                                         approximation_error_L2,
                                                                                         approximation_error_cos))
     return r_cos, r_nonzero
